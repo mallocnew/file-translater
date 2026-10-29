@@ -135,6 +135,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .file-card strong { display: block; word-break: break-all; }
 .file-card p { margin: 2px 0 0; }
 .file-actions, .button-row, .stage-actions { display: flex; gap: 8px; align-items: center; }
+.stage-actions { flex-wrap: wrap; justify-content: flex-end; }
 .text-btn, .stage-actions button, .ghost {
   border: 0;
   background: transparent;
@@ -228,6 +229,13 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .prose code { font-size: 0.92em; }
 .prose a { color: var(--seal); }
 .quote { margin-left: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.layout-result {
+  max-width: 36em;
+  margin: 48px auto 0;
+  text-align: center;
+}
+.layout-result h3 { font-family: var(--serif); font-size: 28px; margin: 0 0 8px; }
+.layout-result p { color: var(--muted); margin: 0 auto; }
 
 @media (max-width: 960px) {
   body { height: auto; }

@@ -13,9 +13,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.catalog import LANGUAGES, MODELS
+from app.catalog import LANGUAGES, MODELS, is_layout_model
 from app.docx_export import markdown_to_docx
 from app.documents import ALLOWED_SUFFIXES, DocumentError, safe_stem, validate_document
+from app.mt_uni import run_layout_translation
+from app.pdf_export import markdown_to_pdf
 from app.settings import (
     DATA_DIR,
     MAX_UPLOAD_BYTES,
@@ -140,7 +142,8 @@ async def translate(token: str, body: TranslateRequest, request: Request) -> Str
 
     def work() -> None:
         try:
-            run_translation(file_path, str(meta["filename"]), options, emit, cancel, live)
+            runner = run_layout_translation if is_layout_model(options.model) else run_translation
+            runner(file_path, str(meta["filename"]), options, emit, cancel, live)
         except TranslationCancelled:
             emit({"type": "cancelled"})
         except (DocumentError, ValueError) as exc:
@@ -185,7 +188,7 @@ async def translate(token: str, body: TranslateRequest, request: Request) -> Str
 
 @app.post("/api/export/docx")
 def export_docx(body: ExportRequest) -> Response:
-    filename = _download_name(body.filename)
+    filename = _download_name(body.filename, ".docx")
     data = markdown_to_docx(body.markdown)
     disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
     return Response(
@@ -193,6 +196,36 @@ def export_docx(body: ExportRequest) -> Response:
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": disposition},
     )
+
+
+@app.post("/api/export/pdf")
+def export_pdf(body: ExportRequest) -> Response:
+    filename = _download_name(body.filename, ".pdf")
+    data = markdown_to_pdf(body.markdown)
+    disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return Response(
+        data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": disposition},
+    )
+
+
+@app.get("/api/result/{token}")
+def result_file(token: str) -> FileResponse:
+    folder = _folder(token)
+    meta = store.read_meta(folder)
+    result = meta.get("result") if isinstance(meta.get("result"), dict) else {}
+    path = folder / str(result.get("file") or "")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="还没有译后文件")
+    filename = _download_name(str(result.get("filename") or path.name), path.suffix.lower() or ".bin")
+    media = (
+        "application/pdf"
+        if path.suffix.lower() == ".pdf"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return FileResponse(path, media_type=media, headers={"Content-Disposition": disposition})
 
 
 def _folder(token: str) -> Path:
@@ -218,10 +251,10 @@ async def _save_upload(file: UploadFile, dest: Path) -> int:
     return size
 
 
-def _download_name(name: str) -> str:
+def _download_name(name: str, suffix: str) -> str:
     cleaned = Path(name).name.replace("\x00", "")
-    if not cleaned.lower().endswith(".docx"):
-        cleaned = f"{cleaned or 'translation'}.docx"
+    if not cleaned.lower().endswith(suffix.lower()):
+        cleaned = f"{cleaned or 'translation'}{suffix}"
     return cleaned[:120]
 
 

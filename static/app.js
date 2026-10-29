@@ -33,6 +33,8 @@ const els = {
   copyBtn: document.getElementById("copyBtn"),
   mdBtn: document.getElementById("mdBtn"),
   docxBtn: document.getElementById("docxBtn"),
+  pdfBtn: document.getElementById("pdfBtn"),
+  fileBtn: document.getElementById("fileBtn"),
   sourceBtn: document.getElementById("sourceBtn"),
 };
 
@@ -40,8 +42,12 @@ const state = {
   config: null,
   token: null,
   stem: "document",
+  kind: "",
   running: false,
+  mode: "text",
   text: "",
+  resultKind: "",
+  resultName: "",
   sourceView: false,
   finished: false,
   controller: null,
@@ -131,6 +137,8 @@ function bind() {
   els.copyBtn.addEventListener("click", copyText);
   els.mdBtn.addEventListener("click", downloadMarkdown);
   els.docxBtn.addEventListener("click", downloadDocx);
+  els.pdfBtn.addEventListener("click", downloadPdf);
+  els.fileBtn.addEventListener("click", downloadLayoutFile);
   els.sourceBtn.addEventListener("click", toggleSource);
   document.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -157,12 +165,25 @@ function currentModelId() {
   return els.model.value;
 }
 
+function isLayoutModel() {
+  const spec = currentSpec();
+  if (spec) return spec.mode === "layout";
+  return currentModelId() === "qwen-mt-uni";
+}
+
 function refreshModelHint() {
   const spec = currentSpec();
+  const layout = isLayoutModel();
   els.modelHint.textContent = spec
     ? spec.hint
     : "填写能直接阅读 PDF 和 Word 的模型 ID，调用方式与 Qwen-Long 相同。";
   els.customModel.hidden = els.model.value !== "__custom__";
+  const dropHint = els.drop.querySelector("span");
+  if (dropHint) {
+    dropHint.textContent = layout
+      ? "用 Qwen-MT-Uni 翻译，尽量交回相同排版的 PDF 或 Word。"
+      : "原文件会直接交给模型，不做本地转换。";
+  }
 }
 
 function refreshKeyState() {
@@ -223,6 +244,7 @@ async function useFile(file) {
   forgetToken();
   resetResult();
   state.stem = file.name.replace(/\.[^.]+$/, "") || "document";
+  state.kind = suffix.replace(".", "");
   els.fileName.textContent = file.name;
   els.fileMeta.textContent = "正在接收文件…";
   els.drop.hidden = true;
@@ -239,6 +261,7 @@ async function useFile(file) {
     if (!response.ok) throw new Error(payload.detail || "文件接收失败");
     state.token = payload.token;
     state.stem = payload.stem || state.stem;
+    state.kind = payload.kind || "";
     els.fileMeta.textContent = `${formatSize(payload.size)} · ${payload.kind.toUpperCase()}`;
     setStatus("");
     refreshStart();
@@ -253,6 +276,7 @@ function clearFile() {
   state.fileSeq += 1;
   stopTranslation();
   forgetToken();
+  state.kind = "";
   els.file.value = "";
   els.fileCard.hidden = true;
   els.drop.hidden = false;
@@ -272,6 +296,9 @@ function forgetToken() {
 
 function resetResult() {
   state.text = "";
+  state.mode = "text";
+  state.resultKind = "";
+  state.resultName = "";
   state.finished = false;
   state.sourceView = false;
   els.result.replaceChildren();
@@ -281,15 +308,35 @@ function resetResult() {
   els.progress.hidden = true;
   els.progress.classList.remove("run");
   els.sourceBtn.textContent = "源码";
+  refreshActions();
+}
+
+function refreshActions() {
+  const layout = state.mode === "layout" && state.finished;
+  const text = state.mode !== "layout" && Boolean(state.text);
+  els.stageActions.hidden = !(layout || text);
+  els.copyBtn.hidden = layout;
+  els.mdBtn.hidden = layout;
+  els.docxBtn.hidden = layout;
+  els.pdfBtn.hidden = layout;
+  els.sourceBtn.hidden = layout;
+  els.fileBtn.hidden = !layout;
 }
 
 async function startTranslation() {
   if (els.start.disabled || state.running || !state.token) return;
+  if (isLayoutModel() && state.kind === "doc") {
+    showError("保留排版不支持旧版 DOC，请另存为 DOCX 后再试");
+    return;
+  }
   clearError();
   state.running = true;
   state.finished = false;
   state.text = "";
   state.sourceView = false;
+  state.mode = isLayoutModel() ? "layout" : "text";
+  state.resultKind = "";
+  state.resultName = "";
   els.stop.hidden = false;
   els.stageActions.hidden = true;
   els.placeholder.hidden = true;
@@ -297,6 +344,16 @@ async function startTranslation() {
   els.progress.hidden = false;
   els.progress.classList.add("run");
   els.result.replaceChildren();
+  if (state.mode === "layout") {
+    const waiting = document.createElement("div");
+    waiting.className = "layout-result";
+    const title = document.createElement("h3");
+    title.textContent = "正在按原格式翻译";
+    const note = document.createElement("p");
+    note.textContent = "这一步不会流出 Markdown，完成后可下载译后的 PDF 或 Word。";
+    waiting.append(title, note);
+    els.result.appendChild(waiting);
+  }
   refreshStart();
   setStatus("正在连接模型");
   const controller = new AbortController();
@@ -350,10 +407,19 @@ function handleEvent(event) {
     return;
   }
   if (event.type === "done") {
-    if (typeof event.text === "string") state.text = event.text;
     state.finished = true;
-    renderResult();
-    els.stageActions.hidden = !state.text;
+    if (event.mode === "layout") {
+      state.mode = "layout";
+      state.resultKind = event.kind || state.kind;
+      state.resultName = event.filename || "";
+      renderLayoutResult();
+      refreshActions();
+    } else {
+      state.mode = "text";
+      if (typeof event.text === "string") state.text = event.text;
+      renderResult();
+      refreshActions();
+    }
     const usage = formatUsage(event);
     setStatus(usage ? `译完 · ${usage}` : "译完");
     return;
@@ -385,17 +451,50 @@ function appendText(chunk) {
 }
 
 function finishPartial(message) {
+  if (state.mode === "layout") {
+    if (!state.resultName) {
+      els.resultScroll.hidden = true;
+      els.placeholder.hidden = false;
+      els.progress.hidden = true;
+      refreshActions();
+      setStatus(message);
+      return;
+    }
+    state.finished = true;
+    renderLayoutResult();
+    refreshActions();
+    setStatus(message);
+    return;
+  }
   if (!state.text) {
     els.resultScroll.hidden = true;
     els.placeholder.hidden = false;
     els.progress.hidden = true;
+    refreshActions();
     setStatus(message);
     return;
   }
   state.finished = true;
   renderResult();
-  els.stageActions.hidden = false;
+  refreshActions();
   setStatus(message);
+}
+
+function renderLayoutResult() {
+  const box = document.createElement("div");
+  box.className = "layout-result";
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "保留排版";
+  const title = document.createElement("h3");
+  title.textContent = "译后文件已就绪";
+  const note = document.createElement("p");
+  const kind = (state.resultKind || state.kind || "").toUpperCase();
+  note.textContent = kind
+    ? `模型按原格式交回了 ${kind}，可直接下载。`
+    : "模型按原格式交回了文件，可直接下载。";
+  box.append(eyebrow, title, note);
+  els.result.replaceChildren(box);
 }
 
 function renderResult() {
@@ -440,23 +539,48 @@ function downloadMarkdown() {
 }
 
 async function downloadDocx() {
-  els.docxBtn.disabled = true;
+  await exportMarkdown("/api/export/docx", `${safeName(state.stem)}-${els.targetLang.value}.docx`, els.docxBtn, "导出 Word 失败");
+}
+
+async function downloadPdf() {
+  await exportMarkdown("/api/export/pdf", `${safeName(state.stem)}-${els.targetLang.value}.pdf`, els.pdfBtn, "导出 PDF 失败");
+}
+
+async function exportMarkdown(url, filename, button, fallback) {
+  button.disabled = true;
   try {
-    const filename = `${safeName(state.stem)}-${els.targetLang.value}.docx`;
-    const response = await fetch("/api/export/docx", {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ markdown: state.text, filename }),
     });
     if (!response.ok) {
       const payload = await readJson(response);
-      throw new Error(payload.detail || "导出 Word 失败");
+      throw new Error(payload.detail || fallback);
     }
     downloadBlob(await response.blob(), filename);
   } catch (error) {
-    showError(error.message || "导出 Word 失败");
+    showError(error.message || fallback);
   } finally {
-    els.docxBtn.disabled = false;
+    button.disabled = false;
+  }
+}
+
+async function downloadLayoutFile() {
+  if (!state.token) return;
+  els.fileBtn.disabled = true;
+  try {
+    const response = await fetch(`/api/result/${state.token}`);
+    if (!response.ok) {
+      const payload = await readJson(response);
+      throw new Error(payload.detail || "下载译后文件失败");
+    }
+    const filename = state.resultName || `${safeName(state.stem)}-${els.targetLang.value}.${state.resultKind || "bin"}`;
+    downloadBlob(await response.blob(), filename);
+  } catch (error) {
+    showError(error.message || "下载译后文件失败");
+  } finally {
+    els.fileBtn.disabled = false;
   }
 }
 
