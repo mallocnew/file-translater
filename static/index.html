@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>页译</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='8' width='52' height='48' rx='4' fill='none' stroke='%23c23a2e' stroke-width='4' transform='rotate(-8 32 32)'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' font-family='serif' fill='%23c23a2e'%3E译%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css?v=6">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="seal" aria-hidden="true">译</span>
+      <div>
+        <h1>页译</h1>
+        <p>把 PDF 和 Word 原样交给模型翻译</p>
+      </div>
+    </div>
+    <p class="key-state" id="keyState"></p>
+  </header>
+
+  <main>
+    <section class="controls panel" aria-label="翻译设置">
+      <div class="controls-scroll">
+        <input class="file-input" id="file" type="file" accept=".pdf,.doc,.docx,application/pdf">
+        <label class="drop" id="drop" for="file">
+          <strong>放下 PDF 或 Word</strong>
+          <span>原文件会直接交给模型，不做本地转换。</span>
+        </label>
+        <div class="file-card" id="fileCard" hidden>
+          <div>
+            <strong id="fileName"></strong>
+            <p id="fileMeta"></p>
+          </div>
+          <div class="file-actions">
+            <button type="button" id="replaceFile" class="text-btn">更换</button>
+            <button type="button" id="clearFile" class="text-btn">移除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="field">原文
+            <select id="sourceLang"></select>
+          </label>
+          <label class="field">译成
+            <select id="targetLang"></select>
+          </label>
+        </div>
+
+        <label class="field">模型
+          <select id="model"></select>
+        </label>
+        <div id="customModel" hidden>
+          <label class="field">模型 ID
+            <input id="modelId" spellcheck="false" placeholder="例如 qwen-long">
+          </label>
+        </div>
+        <p class="hint" id="modelHint"></p>
+
+        <details>
+          <summary>术语和补充要求</summary>
+          <label class="field">术语表
+            <textarea id="glossary" placeholder="一行一条，例如：&#10;transformer=变换器&#10;attention=注意力"></textarea>
+          </label>
+          <label class="field">补充要求
+            <textarea id="instructions" placeholder="例如：保留英文产品名，标题用书名号"></textarea>
+          </label>
+        </details>
+      </div>
+      <div class="controls-foot">
+        <div class="button-row">
+          <button type="button" class="primary" id="start" disabled>开始翻译</button>
+          <button type="button" class="ghost" id="stop" hidden>停止</button>
+        </div>
+        <p class="status" id="status" aria-live="polite"></p>
+        <p class="error" id="error" hidden></p>
+      </div>
+    </section>
+
+    <section class="stage panel">
+      <div class="stage-head">
+        <div>
+          <p class="eyebrow" id="stageEyebrow">译文</p>
+          <h2 id="stageTitle">还没有文档</h2>
+        </div>
+        <div class="stage-actions" id="stageActions" hidden>
+          <button type="button" id="copyBtn">复制</button>
+          <button type="button" id="mdBtn">Markdown</button>
+          <button type="button" id="docxBtn">Word</button>
+          <button type="button" id="sourceBtn">源码</button>
+        </div>
+      </div>
+      <div class="progress" id="progress" hidden><span></span></div>
+      <div class="stage-body" id="stageBody">
+        <div class="placeholder" id="placeholder">
+          <div>
+            <p class="eyebrow">工作台</p>
+            <h3>原文件直接交给模型</h3>
+            <p>本地不做转换、拆页或渲染。译文会显示在这里。</p>
+          </div>
+        </div>
+        <div class="result-scroll" id="resultScroll" hidden>
+          <div id="result"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js?v=6"></script>
+</body>
+</html>
